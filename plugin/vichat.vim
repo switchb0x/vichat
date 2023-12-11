@@ -26,33 +26,27 @@ endfunction
 
 function! VichatPrompt_curl()
     " Capture the selected text
-    let selected_text = join(getline("'<", "'>"), "\n")
+    let selected_text = getline("'<", "'>")
 
     " Get additional input from the user
     let user_input = input("Enter additional optional text for GPT-4: ")
 
     " Combine the selected text and user input
-    let full_prompt = selected_text . "\n" . user_input
+    let full_prompt = join(selected_text, "\n") . "\n" . user_input
 
     let api_url = "https://api.openai.com/v1/completions"
-    let post_data = json_encode({'model': 'text-davinci-003', 'prompt': full_prompt, 'max_tokens': 100, 'temperature': 0.7})
+    let post_data = json_encode({'model': 'text-davinci-003', 'prompt': full_prompt, 'max_tokens': 1000, 'temperature': 0.7})
     let headers = 'Content-Type: application/json' . ' Authorization: Bearer ' . g:openai_api_key
-    
+
     " Construct the curl command with separate -H options for each header
     let curl_command = 'curl -s -X POST ' . shellescape(api_url) . ' -H ' . shellescape('Content-Type: application/json') . ' -H ' . shellescape('Authorization: Bearer ' . g:openai_api_key) . ' -d ' . shellescape(post_data)
- 
-    " Debug: Print the curl command to verify it's correct
-    echom "Curl command: " . curl_command
-    
+
     " Execute the curl command and capture the output
     let response = systemlist(curl_command)
-    
-    " After executing the curl command
-    echom "Raw API Response: " . join(response, "\n")
 
     " Error Handling
     if v:shell_error
-        echom "Shell command failed with error code: " . v:shell_error
+        echoerr "Shell command failed with error code: " . v:shell_error
         return
     endif
 
@@ -60,26 +54,36 @@ function! VichatPrompt_curl()
     try
         let response_json = json_decode(join(response, ""))
     catch
-        echom "Error parsing JSON response."
+        echoerr "Error parsing JSON response."
         return
     endtry
 
     " Extract text from response
     if has_key(response_json, 'choices') && len(response_json.choices) > 0
         let output_text = response_json.choices[0].text
+        " Remove any leading/trailing whitespace
+        let output_text = substitute(output_text, '^\n\+|\n\+$', '', '')
     else
-        echom "Error: Invalid response format."
+        echoerr "Error: Invalid response format."
         return
     endif
 
-    " Process and display output
-    let lines = split(output_text, "\n")
-    let qflist = []
-    for idx in range(len(lines))
-        call add(qflist, {'text': lines[idx], 'lnum': idx + 1})
-    endfor
-    call setqflist(qflist)
-    copen
+    " Define the range for the selected text
+    let start_line = getpos("'<")[1]
+    let end_line = getpos("'>")[1]
+
+    " Start a new undo sequence
+    undojoin | silent execute 'normal! gv"'.nr2char(getchar()).'"'
+
+    " Replace the selected text with the output text
+    call setline(start_line, split(output_text, "\n"))
+    if end_line > start_line
+        " Delete the now-unneeded lines
+        execute start_line+1 . "," . end_line . "delete _"
+    endif
+
+    " Reselect the text
+    normal gv
 endfunction
 
 xnoremap gpt4 :<C-u>call VichatPrompt_curl()<CR>
