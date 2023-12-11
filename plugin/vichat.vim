@@ -34,58 +34,68 @@ function! VichatPrompt_curl()
     " Combine the selected text and user input
     let full_prompt = join(selected_text, "\n") . "\n" . user_input
 
+    " Construct the data dictionary with the sanitized prompt
+    let data_dict = {
+    \ 'model': 'text-davinci-003',
+    \ 'prompt': full_prompt,
+    \ 'max_tokens': 2000,
+    \ 'temperature': 0.7
+    \ }
+
     let api_url = "https://api.openai.com/v1/completions"
-    let post_data = json_encode({'model': 'text-davinci-003', 'prompt': full_prompt, 'max_tokens': 1000, 'temperature': 0.7})
-    let headers = 'Content-Type: application/json' . ' Authorization: Bearer ' . g:openai_api_key
+    let post_data_json = json_encode(data_dict)
+    
+    " Write the JSON to a temporary file to avoid shell escaping issues
+    let tmpfname = tempname()
+    call writefile([post_data_json], tmpfname)
+    
+    let content_type_header = 'Content-Type: application/json'
+    let auth_header = 'Authorization: Bearer ' . g:openai_api_key
+    
+    " Construct the curl command to use the JSON from the temporary file
+    let curl_command = 'curl -s -X POST ' . api_url .
+                \ ' -H "' . content_type_header .
+                \ '" -H "' . auth_header .
+                \ '" --data-binary @' . tmpfname
+    
+    "echo "Request: " . curl_command . "\n\n"
 
-    " Construct the curl command with separate -H options for each header
-    let curl_command = 'curl -s -X POST ' . shellescape(api_url) . ' -H ' . shellescape('Content-Type: application/json') . ' -H ' . shellescape('Authorization: Bearer ' . g:openai_api_key) . ' -d ' . shellescape(post_data)
+    " Execute the curl command and capture the output as a string
+    let response = system(curl_command)
 
-    " Execute the curl command and capture the output
-    let response = systemlist(curl_command)
+    echo "Response: " . response
 
-    " Error Handling
-    if v:shell_error
-        echoerr "Shell command failed with error code: " . v:shell_error
-        return
-    endif
+    " Remove the temporary file immediately after use
+    call delete(tmpfname)
 
-    " Parse JSON response
-    try
-        let response_json = json_decode(join(response, ""))
-    catch
-        echoerr "Error parsing JSON response."
-        return
-    endtry
-
-    " Extract text from response
-    if has_key(response_json, 'choices') && len(response_json.choices) > 0
-        let output_text = response_json.choices[0].text
-        " Remove any leading/trailing whitespace
-        let output_text = substitute(output_text, '^\n\+|\n\+$', '', '')
+    " Handle the response
+    if response != ""
+        try
+            let response_json = json_decode(response)
+            " If response_json is parsed successfully, handle it
+            if has_key(response_json, 'choices') && len(response_json.choices) > 0
+                let output_text = response_json.choices[0].text
+                let action = input("Replace or insert output? (R/I): ", "R")
+                let start_line = getpos("'<")[1]
+                let end_line = getpos("'>")[1]
+                silent! undojoin
+                if toupper(action) == 'R'
+                    execute start_line . "," . end_line . "delete _"
+                    call append(start_line-1, split(output_text, "\n"))
+                elseif toupper(action) == 'I'
+                    call append(end_line, split(output_text, "\n"))
+                endif
+            else
+                echoerr "Error: Invalid response format."
+            endif
+        catch
+            echoerr "Error parsing JSON response: " . v:exception
+        endtry
     else
-        echoerr "Error: Invalid response format."
-        return
+        echoerr "Received invalid response from API."
     endif
-
-    " Define the range for the selected text
-    let start_line = getpos("'<")[1]
-    let end_line = getpos("'>")[1]
-
-    " Start a new undo sequence
-    undojoin | silent execute 'normal! gv"'.nr2char(getchar()).'"'
-
-    " Replace the selected text with the output text
-    call setline(start_line, split(output_text, "\n"))
-    if end_line > start_line
-        " Delete the now-unneeded lines
-        execute start_line+1 . "," . end_line . "delete _"
-    endif
-
-    " Reselect the text
-    normal gv
 endfunction
 
-xnoremap gpt4 :<C-u>call VichatPrompt_curl()<CR>
+xnoremap gpt :<C-u>call VichatPrompt_curl()<CR>
 call CheckAPIToken()
 
