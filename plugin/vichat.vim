@@ -20,11 +20,11 @@ function! CheckAPIToken()
         echo "[vichat plugin] OpenAI API token not found in environment variables."
         echo "Please set the OPENAI_API_TOKEN environment variable."
     else
-        "echo "OpenAI API key loaded successfully."
+        let g:openai_api_key = api_key
     endif
 endfunction
 
-function! VichatPrompt()
+function! VichatPrompt_curl()
     " Capture the selected text
     let selected_text = join(getline("'<", "'>"), "\n")
 
@@ -34,56 +34,54 @@ function! VichatPrompt()
     " Combine the selected text and user input
     let full_prompt = selected_text . "\n" . user_input
 
-    let api_url = "https://api.openai.com/v1/engines/davinci-codex/completions"
-    let post_data = json_encode({'prompt': full_prompt, 'max_tokens': 100})
-    let headers = ['Content-Type: application/json', 'Authorization: Bearer ' . api_key]
-
-    " The list format for the curl command is not needed for system() or systemlist()
-    " We'll directly construct the command as a string, which systemlist() will handle properly
-    let curl_command = 'curl -s -X POST ' . shellescape(api_url) . ' -H ' . shellescape(headers[0]) . ' -H ' . shellescape(headers[1]) . ' --data ' . shellescape(post_data)
-
-    " Debug: Print the curl command
-    echom "Executing command: " . curl_command
-
-    " Execute the curl command and capture the output as a list of lines
+    let api_url = "https://api.openai.com/v1/completions"
+    let post_data = json_encode({'model': 'text-davinci-003', 'prompt': full_prompt, 'max_tokens': 100, 'temperature': 0.7})
+    let headers = 'Content-Type: application/json' . ' Authorization: Bearer ' . g:openai_api_key
+    
+    " Construct the curl command with separate -H options for each header
+    let curl_command = 'curl -s -X POST ' . shellescape(api_url) . ' -H ' . shellescape('Content-Type: application/json') . ' -H ' . shellescape('Authorization: Bearer ' . g:openai_api_key) . ' -d ' . shellescape(post_data)
+ 
+    " Debug: Print the curl command to verify it's correct
+    echom "Curl command: " . curl_command
+    
+    " Execute the curl command and capture the output
     let response = systemlist(curl_command)
+    
+    " After executing the curl command
+    echom "Raw API Response: " . join(response, "\n")
 
-    " Check for a shell error
+    " Error Handling
     if v:shell_error
         echom "Shell command failed with error code: " . v:shell_error
         return
     endif
 
-    " Assuming the response is JSON and contains a 'choices' list with at least one element
-    " Parse the response to extract the text
-    let response_json = json_decode(join(response, ""))
-    if has_key(response_json, 'choices')
+    " Parse JSON response
+    try
+        let response_json = json_decode(join(response, ""))
+    catch
+        echom "Error parsing JSON response."
+        return
+    endtry
+
+    " Extract text from response
+    if has_key(response_json, 'choices') && len(response_json.choices) > 0
         let output_text = response_json.choices[0].text
     else
         echom "Error: Invalid response format."
         return
     endif
 
-    " Split the output text into lines for the quickfix list
+    " Process and display output
     let lines = split(output_text, "\n")
-
-    " Create a list for the quickfix window
     let qflist = []
     for idx in range(len(lines))
         call add(qflist, {'text': lines[idx], 'lnum': idx + 1})
     endfor
-
-    " Set the quickfix list and open the quickfix window
     call setqflist(qflist)
     copen
 endfunction
 
-
-
-" Map the function to a hotkey in visual mode, e.g., gpt4
-xnoremap gpt4 :<C-u>call VichatPrompt()<CR>
-
-" Call the function when Vim starts
+xnoremap gpt4 :<C-u>call VichatPrompt_curl()<CR>
 call CheckAPIToken()
-
 
