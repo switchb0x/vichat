@@ -24,85 +24,14 @@ function! CheckAPIToken()
     endif
 endfunction
 
-function! VichatPrompt_curl()
-    " Capture the selected text
-    let selected_text = getline("'<", "'>")
 
-    " Get additional input from the user
-    let user_input = input("Enter additional optional text for GPT: ")
-
-    " Combine the selected text and user input
-    let full_prompt = join(selected_text, "\n") . "\n" . user_input
-
-    " Construct the data dictionary with the sanitized prompt
-    let data_dict = {
-    \ 'model': 'text-davinci-003',
-    \ 'prompt': full_prompt,
-    \ 'max_tokens': 2000,
-    \ 'temperature': 0.7
-    \ }
-
-    let api_url = "https://api.openai.com/v1/completions"
-    let post_data_json = json_encode(data_dict)
-    
-    " Write the JSON to a temporary file to avoid shell escaping issues
-    let tmpfname = tempname()
-    call writefile([post_data_json], tmpfname)
-    
-    let content_type_header = 'Content-Type: application/json'
-    let auth_header = 'Authorization: Bearer ' . g:openai_api_key
-    
-    " Construct the curl command to use the JSON from the temporary file
-    let curl_command = 'curl -s -X POST ' . api_url .
-                \ ' -H "' . content_type_header .
-                \ '" -H "' . auth_header .
-                \ '" --data-binary @' . tmpfname
-    
-    "echo "Request: " . curl_command . "\n\n"
-
-    " Execute the curl command and capture the output as a string
-    let response = system(curl_command)
-
-    "echo "Response: " . response
-
-    " Remove the temporary file immediately after use
-    call delete(tmpfname)
-
-    " Handle the response
-    if response != ""
-        try
-            let response_json = json_decode(response)
-            " If response_json is parsed successfully, handle it
-            if has_key(response_json, 'choices') && len(response_json.choices) > 0
-                let output_text = response_json.choices[0].text
-                let action = input("Replace or insert output? (R/I): ", "R")
-                let start_line = getpos("'<")[1]
-                let end_line = getpos("'>")[1]
-                silent! undojoin
-                if toupper(action) == 'R'
-                    execute start_line . "," . end_line . "delete _"
-                    call append(start_line-1, split(output_text, "\n"))
-                elseif toupper(action) == 'I'
-                    call append(end_line, split(output_text, "\n"))
-                endif
-            else
-                echoerr "Error: Invalid response format."
-            endif
-        catch
-            echoerr "Error parsing JSON response: " . v:exception
-        endtry
-    else
-        echoerr "Received invalid response from API."
-    endif
-endfunction
-
-function! VichatPrompt4_curl()
+function! VichatPrompt4_curl(model)
     " Capture the selected text as the system's message (previous context)
     let system_message = getline("'<", "'>")
     let system_message = join(system_message, "\n")
 
     " Get additional input from the user as the user's message
-    let user_message = input("Enter your message for GPT-4: ")
+    let user_message = input("Enter your message for " . a:model . ": ")
 
     " Construct the messages array with the user and system messages
     let messages = []
@@ -136,11 +65,11 @@ function! VichatPrompt4_curl()
                 \ '" -H "' . auth_header .
                 \ '" --data-binary @' . tmpfname
     
-    echo curl_command
+    "echo curl_command
 
     " Execute the curl command and capture the output as a string
     let response = system(curl_command)
-    echo response
+    "echo response
 
     " Remove the temporary file immediately after use
     call delete(tmpfname)
@@ -173,7 +102,7 @@ function! VichatPrompt4_curl()
     endif
 endfunction
 
-xnoremap gpt :<C-u>call VichatPrompt_curl()<CR>
-xnoremap gpt4 :<C-u>call VichatPrompt4_curl()<CR>
+xnoremap gpt :<C-u>call VichatPrompt4_curl('gpt-3.5-turbo')<CR>
+xnoremap gpt4 :<C-u>call VichatPrompt4_curl('gpt-4')<CR>
 call CheckAPIToken()
 
